@@ -9,11 +9,22 @@ tello_address = ('192.168.10.1', 8889)
 
 def main():
     sock = connect_to_tello(9000)
-    for i in range(60):
+    print(f"{datetime.datetime.now():%H:%M:%S}] send takeoff")
+    send_command(sock, "takeoff")
+    print(f"{datetime.datetime.now():%H:%M:%S}] takeoff complete")
+    send_command(sock, "up 40")
+    for i in range(20):
         battery = send_command(sock, "battery?")
         temp = send_command(sock, "temp?")
         print(f"{datetime.datetime.now():%H:%M:%S}] battery {battery.strip()}% temp {temp.strip()}")
         time.sleep(1)
+
+    print(f"{datetime.datetime.now():%H:%M:%S}] send rotate 360 ")
+    send_command(sock, "cw 360")
+    print(f"{datetime.datetime.now():%H:%M:%S}] rotatation complete ")
+    send_command(sock, "down 20")
+    send_command(sock, "land")
+    print(f"{datetime.datetime.now():%H:%M:%S}] landed")
     sock.close()
 
 def connect_to_tello(localPort, start_sdk = True):
