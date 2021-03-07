@@ -17,16 +17,17 @@ def main():
     telemetry = TelemetryThread(q, connect_to_tello('0.0.0.0',8890, False))
     telemetry.start()
     send_command(sock, "takeoff")
-    send_command(sock, "speed 60")
     send_command(sock, "left 20")
-    send_command(sock, "right 40")
+    send_command(sock, "right 20")
     send_command(sock, "speed 10")
     send_command(sock, "cw 360")
     send_command(sock, "flip l")
     send_command(sock, "land")
     q.put("STOP")
+    print(send_command(sock, "battery?"))
     sock.close()
     plot_pry(telemetry.get_pitch(), telemetry.get_roll(), telemetry.get_yaw())
+
 
 def plot_pry(pitch, roll, yaw):
     fig, ax = plt.subplots(1, figsize=(8,6))
