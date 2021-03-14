@@ -5,7 +5,8 @@ use opencv::core::Mat;
 use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::objdetect;
-use std::{fs, ops::Add, ops::Sub, str::from_utf8};
+use std::time::{Duration, Instant};
+use std::{fs, ops::Add, ops::Sub};
 use std::{
     io::prelude::*,
     net::{SocketAddr, UdpSocket},
@@ -67,7 +68,7 @@ fn create_bg_txt(dir: &str) {
 }
 
 fn cam() {
-    let mut red_cs = objdetect::CascadeClassifier::new("CS_RED_25.xml").unwrap();
+    let mut red_cs = objdetect::CascadeClassifier::new("CS_RED_40.xml").unwrap();
     let color_red = core::Scalar::new(0.0, 0.0, 255.0, 0.0);
     let color_cyn = core::Scalar::new(252.0, 187.0, 22.0, 0.0);
     let font = opencv::highgui::font_qt(
@@ -102,7 +103,6 @@ fn cam() {
     .unwrap();
     let mut frame = Mat::default().unwrap();
     let mut rects: core::Vector<core::Rect> = core::Vector::new();
-    let mut instant = std::time::Instant::now();
     video.read(&mut frame).expect("frame");
     let screen_rect = core::Rect::new(
         0,
@@ -111,35 +111,42 @@ fn cam() {
         video.get(opencv::videoio::CAP_PROP_FRAME_HEIGHT).unwrap() as i32,
     );
     let mut take_off = false;
-    let mut fails = 50;
     socket.set_nonblocking(true).unwrap();
     socket.send_to(b"takeoff", tello_address).unwrap();
-
+    let mut instant = Instant::now();
+    let mut fail_time = Instant::now();
     loop {
         if video.read(&mut frame).unwrap() {
             if !take_off {
-                match socket.recv_from(&mut buffer) {
-                    Ok(n) => {
-                        let read = std::str::from_utf8(&buffer[..n.0]).unwrap();
-                        if read == "Ok" {
-                            take_off = true;
-                        } else {
-                            socket.send_to(b"land", tello_address).unwrap();
+                if instant.elapsed() >= Duration::from_secs(1) {
+                    match socket.recv_from(&mut buffer) {
+                        Ok(n) => {
+                            let read = std::str::from_utf8(&buffer[..n.0]).unwrap();
+                            println!("{}", read);
+                            if read == "ok" {
+                                socket.send_to(b"rc 0 0 0 0", tello_address).unwrap();
+                                fail_time = Instant::now();
+                                instant = Instant::now();
+                                take_off = true;
+                            } else {
+                                socket.send_to(b"land", tello_address).unwrap();
+                                break;
+                            }
+                        }
+                        Err(ref r) if r.kind() == std::io::ErrorKind::WouldBlock => {
+                            println!("wait");
+                            instant = Instant::now();
+                        }
+                        Err(e) => {
+                            eprintln!("{}", e);
                             break;
                         }
-                    }
-                    Err(ref r) if r.kind() == std::io::ErrorKind::WouldBlock => {
-                        println!("wait");
-                    }
-                    Err(e) => {
-                        eprintln!("{}", e);
-                        break;
                     }
                 }
             } else {
                 //imgproc::resize(&frame.clone(), &mut frame, core::Size::new(250,250),0f64,0f64, imgproc::INTER_LINEAR).unwrap();
                 //imgproc::cvt_color(&frame.clone(), &mut frame, imgproc::COLOR_RGB2GRAY, 0).unwrap();
-                if instant.elapsed() >= std::time::Duration::from_millis(200) {
+                if instant.elapsed() >= Duration::from_millis(200) {
                     red_cs
                         .detect_multi_scale(
                             &frame,
@@ -150,8 +157,8 @@ fn cam() {
                             core::Size::new(30, 30),
                             core::Size::new(0, 0),
                         )
-                        .expect("Faccia");
-                    instant = std::time::Instant::now();
+                        .expect("Multiscale Detection");
+                    instant = Instant::now();
                 }
 
                 let command: String;
@@ -176,11 +183,11 @@ fn cam() {
                     } else {
                         command = "rc 0 0 0 0".to_string();
                     }
-                    fails = 50;
+                    fail_time = Instant::now();
                 } else {
                     command = "rc 0 0 0 0".to_string();
-                    fails -= 1;
-                    if fails == 0 {
+                    if fail_time.elapsed() >= Duration::from_secs(6) {
+                        println!("FAILED");
                         break;
                     }
                 }
@@ -192,7 +199,9 @@ fn cam() {
                 ) {
                     eprintln!("{}", a);
                 }
-
+                socket
+                    .send_to(command.into_bytes().as_slice(), tello_address)
+                    .unwrap();
                 imgproc::circle(
                     &mut frame,
                     rect_center(&screen_rect),
@@ -203,8 +212,8 @@ fn cam() {
                     0,
                 )
                 .unwrap();
-                opencv::highgui::imshow("tello", &frame).expect("poop");
             }
+            opencv::highgui::imshow("tello", &frame).expect("Failed to display frame");
         }
         if let Ok(key) = opencv::highgui::wait_key(2) {
             if key == 27 {
